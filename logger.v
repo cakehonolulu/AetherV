@@ -1,9 +1,3 @@
-/*
- * logger_uart.v
- *
- * Monitors the core error signal. On detecting a decoding/execution error,
- * prints over UART: "RV32I: Unhandled opcode 0x%08X @ PC 0x%08X" exactly once, then stops.
- */
 module logger_uart #(
     parameter CLK_FREQ = 27,      // MHz
     parameter BAUD     = 115200    // baud rate
@@ -33,7 +27,6 @@ module logger_uart #(
         .tx(tx)
     );
 
-    // Total bytes: 26 prefix + 8 instr + 8 middle + 8 pc = 50
     localparam MSG_LEN = 50;
 
     // State
@@ -43,7 +36,6 @@ module logger_uart #(
     reg [31:0] pc_reg;
     reg [5:0]  byte_idx;
 
-    // Capture rising error and latch data
     always @(posedge clk or negedge rst) begin
         if (!rst) begin
             error_seen   <= 1'b0;
@@ -51,7 +43,6 @@ module logger_uart #(
             pc_reg       <= 32'd0;
             error_seen_d <= 1'b0;
         end else begin
-            // delay register for one-cycle start
             error_seen_d <= error_seen;
             if (error && !error_seen) begin
                 error_seen <= 1'b1;
@@ -61,19 +52,17 @@ module logger_uart #(
         end
     end
 
-    // 4-bit to ASCII hex
-    function [7:0] hx;
-        input [3:0] d;
-        begin hx = (d<10) ? 8'd48+d : 8'd55+d; end
+    function [7:0] hx(input [3:0] d);
+        hx = (d < 4'd10)
+             ? (8'd48 + {4'b0000, d})
+             : (8'd55 + {4'b0000, d});
     endfunction
 
-    // Pick next byte
     always @(*) begin
         uart_data = 8'h00;
         if (!error_seen_d || byte_idx>=MSG_LEN) begin
             uart_data = 8'h00;
         end else if (byte_idx<26) begin
-            // explicit prefix
             case (byte_idx)
                 0: uart_data="R"; 1:uart_data="V"; 2:uart_data="3"; 3:uart_data="2";
                 4:uart_data="I"; 5:uart_data=":"; 6:uart_data=" ";
@@ -87,10 +76,8 @@ module logger_uart #(
                 24:uart_data="0";25:uart_data="x";
             endcase
         end else if (byte_idx<26+8) begin
-            // instr hex
             uart_data = hx(instr_reg[4*(7-(byte_idx-26))+:4]);
         end else if (byte_idx<26+8+8) begin
-            // middle " @ PC 0x"
             case(byte_idx-(26+8))
                 0:uart_data=" ";
                 1:uart_data="@";
@@ -102,12 +89,10 @@ module logger_uart #(
                 7:uart_data="x";
             endcase
         end else begin
-            // pc hex
             uart_data = hx(pc_reg[4*(7-(byte_idx-(26+8+8)))+:4]);
         end
     end
 
-    // Drive valid & index, start one cycle after error
     reg uart_ready_d;
     always @(posedge clk or negedge rst) begin
         if (!rst) begin
@@ -115,12 +100,10 @@ module logger_uart #(
             byte_idx     <= 6'd0;
             uart_ready_d <= 1'b0;
         end else begin
-            // only remember “ready” if we were already valid
             uart_ready_d <= uart_ready & uart_valid;
 
             if (error_seen_d && byte_idx < MSG_LEN) begin
             uart_valid <= 1'b1;
-            // increment only when ready was asserted *while* we were valid last cycle
             if (uart_ready_d) begin
                 byte_idx <= byte_idx + 1;
             end
