@@ -3,8 +3,7 @@ module core (
     input         rst_i,
     output [31:0] pc_out,
     output [31:0] instr_out,
-    output        error,
-    output        uart_tx
+    output        error
 );
     // FETCH
     wire [31:0] next_pc;
@@ -47,18 +46,4 @@ module core (
 
     assign next_pc = pc_out + 4;
     assign pc_sel  = 1'b0;
-
-    // LOGGER: on error, send message over UART and halt further sends
-    logger_uart #(
-        .CLK_FREQ(27),
-        .BAUD(115200)
-    ) u_logger (
-        .clk(clk),
-        .rst(rst_i),
-        .error(error),
-        .instr_in(instr_out),
-        .pc_in(pc_out),
-        .tx(uart_tx)
-    );
-
 endmodule

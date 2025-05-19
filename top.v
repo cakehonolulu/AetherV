@@ -14,16 +14,35 @@ module top (
     wire [31:0] pc, instr;
     wire        error;
 
-    wire uart_tx;
-    assign TXD = uart_tx;
+    wire [7:0] logger_uart_data;
+    wire       logger_uart_valid, logger_uart_ready;
 
     core u_core (
         .clk      (clk),
         .rst_i    (rst_l),
         .pc_out   (pc),
         .instr_out(instr),
-        .error    (error),
-        .uart_tx  (uart_tx)
+        .error    (error)
+    );
+
+    logger_uart u_logger (
+        .clk(clk),
+        .rst(rst_l),
+        .error(error),
+        .instr_in(instr),
+        .pc_in(pc),
+        .uart_data(logger_uart_data),
+        .uart_valid(logger_uart_valid),
+        .uart_ready(logger_uart_ready)
+    );
+
+    uart_peripheral u_uart (
+        .clk(clk),
+        .rst(rst_l),
+        .data_in(logger_uart_data),
+        .data_valid(logger_uart_valid),
+        .data_ready(logger_uart_ready),
+        .tx(TXD)
     );
 
     led_driver u_led (

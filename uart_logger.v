@@ -7,25 +7,10 @@ module logger_uart #(
     input        error,          // error signal from core
     input [31:0] instr_in,       // instruction word
     input [31:0] pc_in,          // program counter at error
-    output       tx              // UART transmit line
+    output reg  [7:0] uart_data, // UART data byte
+    output reg        uart_valid, // UART valid signal
+    input             uart_ready  // UART ready signal
 );
-
-    // UART transmitter interface
-    reg        uart_valid;
-    wire       uart_ready;
-    reg [7:0]  uart_data;
-
-    uart_tx #(
-        .CLK_FREQ(CLK_FREQ),
-        .BAUD(   BAUD)       
-    ) u_uart_tx (
-        .clk(clk),
-        .rst(rst),
-        .data(uart_data),
-        .valid(uart_valid),
-        .ready(uart_ready),
-        .tx(tx)
-    );
 
     localparam MSG_LEN = 50;
 
@@ -103,15 +88,14 @@ module logger_uart #(
             uart_ready_d <= uart_ready & uart_valid;
 
             if (error_seen_d && byte_idx < MSG_LEN) begin
-            uart_valid <= 1'b1;
-            if (uart_ready_d) begin
-                byte_idx <= byte_idx + 1;
-            end
+                uart_valid <= 1'b1;
+                if (uart_ready_d) begin
+                    byte_idx <= byte_idx + 1;
+                end
             end else begin
-            uart_valid <= 1'b0;
+                uart_valid <= 1'b0;
             end
         end
     end
-
 
 endmodule
