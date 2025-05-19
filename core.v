@@ -8,7 +8,7 @@ module core (
     // FETCH
     wire [31:0] next_pc;
     wire        pc_sel;
-    reg         halt = 0;
+    wire        halt = error;
 
     pc #(.WIDTH(32)) u_pc (
         .clk(clk), .rst_i(rst_i),

@@ -4,5 +4,5 @@ module led_driver (
     output [5:0]  led
 );
     wire [5:0] data = pc[31:26];
-    assign led = error ? 6'b111000 : ~data;
+    assign led = error ? 6'b111111 : ~data;
 endmodule

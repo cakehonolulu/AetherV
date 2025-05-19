@@ -1,101 +1,92 @@
 module logger_uart #(
-    parameter CLK_FREQ = 27,      // MHz
-    parameter BAUD     = 115200    // baud rate
+    parameter CLK_FREQ = 27,
+    parameter BAUD     = 115200
 )(
-    input        clk,            // system clock
-    input        rst,            // active-low async reset
-    input        error,          // error signal from core
-    input [31:0] instr_in,       // instruction word
-    input [31:0] pc_in,          // program counter at error
-    output reg  [7:0] uart_data, // UART data byte
-    output reg        uart_valid, // UART valid signal
-    input             uart_ready  // UART ready signal
+    input        clk,
+    input        rst,
+    input        error,
+    input [31:0] instr_in,
+    input [31:0] pc_in,
+    output reg  [7:0] uart_data,
+    output reg        uart_valid,
+    input             uart_ready
 );
-
     localparam MSG_LEN = 50;
+    localparam PREFIX_LEN = 26;
+    localparam SUFFIX_LEN = 8;
+    localparam PC_LEN = 8;
+    
+    // Message prefix as a string
+    localparam [8*PREFIX_LEN-1:0] PREFIX = {
+        "RV32I: Unhandled opcode 0x"
+    };
+    localparam [8*SUFFIX_LEN-1:0] SUFFIX = {
+        " @ PC 0x"
+    };
 
-    // State
-    reg        error_seen;
-    reg        error_seen_d;
-    reg [31:0] instr_reg;
-    reg [31:0] pc_reg;
-    reg [5:0]  byte_idx;
+    reg [31:0] instr_reg, pc_reg;
+    reg [5:0] byte_idx;
 
-    always @(posedge clk or negedge rst) begin
-        if (!rst) begin
-            error_seen   <= 1'b0;
-            instr_reg    <= 32'd0;
-            pc_reg       <= 32'd0;
-            error_seen_d <= 1'b0;
-        end else begin
-            error_seen_d <= error_seen;
-            if (error && !error_seen) begin
-                error_seen <= 1'b1;
-                instr_reg  <= instr_in;
-                pc_reg     <= pc_in;
-            end
-        end
-    end
+    // State machine for logger
+    localparam S_IDLE = 2'd0, S_SEND = 2'd1, S_DONE = 2'd2;
+    reg [1:0] state;
 
-    function [7:0] hx(input [3:0] d);
-        hx = (d < 4'd10)
-             ? (8'd48 + {4'b0000, d})
-             : (8'd55 + {4'b0000, d});
+    // Hex digit to ASCII
+    function [7:0] hx;
+        input [3:0] d;
+        hx = (d < 10) ? (8'd48 + {4'b0, d}) : (8'd55 + {4'b0, d});
     endfunction
 
-    always @(*) begin
-        uart_data = 8'h00;
-        if (!error_seen_d || byte_idx>=MSG_LEN) begin
-            uart_data = 8'h00;
-        end else if (byte_idx<26) begin
-            case (byte_idx)
-                0: uart_data="R"; 1:uart_data="V"; 2:uart_data="3"; 3:uart_data="2";
-                4:uart_data="I"; 5:uart_data=":"; 6:uart_data=" ";
-                7:uart_data="U"; 8:uart_data="n"; 9:uart_data="h";
-                10:uart_data="a";11:uart_data="n";12:uart_data="d";
-                13:uart_data="l";14:uart_data="e";15:uart_data="d";
-                16:uart_data=" ";
-                17:uart_data="o";18:uart_data="p";19:uart_data="c";
-                20:uart_data="o";21:uart_data="d";22:uart_data="e";
-                23:uart_data=" ";
-                24:uart_data="0";25:uart_data="x";
-            endcase
-        end else if (byte_idx<26+8) begin
-            uart_data = hx(instr_reg[4*(7-(byte_idx-26))+:4]);
-        end else if (byte_idx<26+8+8) begin
-            case(byte_idx-(26+8))
-                0:uart_data=" ";
-                1:uart_data="@";
-                2:uart_data=" ";
-                3:uart_data="P";
-                4:uart_data="C";
-                5:uart_data=" ";
-                6:uart_data="0";
-                7:uart_data="x";
-            endcase
-        end else begin
-            uart_data = hx(pc_reg[4*(7-(byte_idx-(26+8+8)))+:4]);
-        end
-    end
-
-    reg uart_ready_d;
+    // Sequential logic
     always @(posedge clk or negedge rst) begin
         if (!rst) begin
-            uart_valid   <= 1'b0;
-            byte_idx     <= 6'd0;
-            uart_ready_d <= 1'b0;
+            state      <= S_IDLE;
+            instr_reg  <= 32'd0;
+            pc_reg     <= 32'd0;
+            byte_idx   <= 0;
+            uart_valid <= 1'b0;
         end else begin
-            uart_ready_d <= uart_ready & uart_valid;
-
-            if (error_seen_d && byte_idx < MSG_LEN) begin
-                uart_valid <= 1'b1;
-                if (uart_ready_d) begin
-                    byte_idx <= byte_idx + 1;
+            case (state)
+                S_IDLE: begin
+                    uart_valid <= 1'b0;
+                    if (error) begin
+                        state     <= S_SEND;
+                        instr_reg <= instr_in;
+                        pc_reg    <= pc_in;
+                        byte_idx  <= 0;
+                    end
                 end
-            end else begin
-                uart_valid <= 1'b0;
-            end
+                S_SEND: begin
+                    uart_valid <= 1'b1;
+                    if (uart_valid && uart_ready) begin
+                        if (byte_idx == MSG_LEN-1)
+                            state <= S_DONE;
+                        byte_idx <= byte_idx + 1;
+                    end
+                end
+                S_DONE: begin
+                    uart_valid <= 1'b0;
+                end
+                default: begin
+                    state <= S_IDLE;
+                    uart_valid <= 1'b0;
+                end
+            endcase
         end
     end
 
+    // Combinational logic for uart_data
+    always @(*) begin
+        if (state != S_SEND || byte_idx >= MSG_LEN) begin
+            uart_data = 8'h00;
+        end else if (byte_idx < PREFIX_LEN) begin
+            uart_data = PREFIX[8*(PREFIX_LEN-1-byte_idx) +: 8];
+        end else if (byte_idx < PREFIX_LEN + 8) begin
+            uart_data = hx(instr_reg[4*(7-(byte_idx-PREFIX_LEN)) +: 4]);
+        end else if (byte_idx < PREFIX_LEN + 8 + SUFFIX_LEN) begin
+            uart_data = SUFFIX[8*(SUFFIX_LEN-1-(byte_idx-(PREFIX_LEN+8))) +: 8];
+        end else begin
+            uart_data = hx(pc_reg[4*(7-(byte_idx-(PREFIX_LEN+8+SUFFIX_LEN))) +: 4]);
+        end
+    end
 endmodule
