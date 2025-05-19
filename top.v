@@ -17,9 +17,13 @@ module top (
     wire [7:0] logger_uart_data;
     wire       logger_uart_valid, logger_uart_ready;
 
+    // System active: run until error and logger is done
+    wire system_active = !error || logger_uart_valid;
+
     core u_core (
         .clk      (clk),
         .rst_i    (rst_l),
+        .system_active(system_active),
         .pc_out   (pc),
         .instr_out(instr),
         .error    (error)
@@ -48,6 +52,7 @@ module top (
     led_driver u_led (
         .pc    (pc),
         .error (error),
+        .system_active(system_active),
         .led   (led)
     );
 endmodule

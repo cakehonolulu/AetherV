@@ -21,94 +21,75 @@ module uart_tx
     localparam S_SEND_BYTE = 3'd3;
     localparam S_STOP      = 3'd4;
 
-    reg [2:0] state, next_state;
+    reg [2:0] state;
     reg [31:0] cycle_cnt;       // *** widened to 32 bits ***
     reg [2:0]  bit_cnt;         // which data bit we're on
     reg [7:0]  tx_data_latch;   // holds the byte during transmission
     reg        tx_reg;          // drives the serial line
+    reg        active;          // gating register
 
     assign tx = tx_reg;
 
-    // Sequential state register
+    // Simplified UART transmitter with gating
     always @(posedge clk or negedge rst) begin
-        if (!rst)
-            state <= S_IDLE;
-        else
-            state <= next_state;
-    end
-
-    // Next‑state logic (combinational — use blocking “=”)
-    always @(*) begin
-        case (state)
-            S_IDLE:
-                if (valid) next_state = S_START;
-                else       next_state = S_IDLE;
-            S_START:
-                if (cycle_cnt == CYCLE-1) next_state = S_SEND_BYTE;
-                else                      next_state = S_START;
-            S_SEND_BYTE:
-                if (cycle_cnt == CYCLE-1 && bit_cnt == 3'd7)
-                    next_state = S_STOP;
-                else
-                    next_state = S_SEND_BYTE;
-            S_STOP:
-                if (cycle_cnt == CYCLE-1) next_state = S_IDLE;
-                else                      next_state = S_STOP;
-            default:
-                next_state = S_IDLE;
-        endcase
-    end
-
-    // drive “ready”
-    always @(posedge clk or negedge rst) begin
-        if (!rst)
-            ready <= 1'b0;
-        else if (state == S_IDLE)
-            ready <= !valid;
-        else if (state == S_STOP && cycle_cnt == CYCLE-1)
-            ready <= 1'b1;
-    end
-
-    // latch the data byte
-    always @(posedge clk or negedge rst) begin
-        if (!rst)
+        if (!rst) begin
+            state         <= S_IDLE;
+            cycle_cnt     <= 32'd0;
+            bit_cnt       <= 3'd0;
             tx_data_latch <= 8'd0;
-        else if (state == S_IDLE && valid)
-            tx_data_latch <= data;
-    end
-
-    // count bits during S_SEND_BYTE
-    always @(posedge clk or negedge rst) begin
-        if (!rst)
-            bit_cnt <= 3'd0;
-        else if (state == S_SEND_BYTE) begin
-            if (cycle_cnt == CYCLE-1)
-                bit_cnt <= bit_cnt + 3'd1;
-        end else
-            bit_cnt <= 3'd0;
-    end
-
-    // baud‑rate counter — all literals widened to 32 bits
-    always @(posedge clk or negedge rst) begin
-        if (!rst)
-            cycle_cnt <= 32'd0;
-        else if ((state == S_SEND_BYTE && cycle_cnt == CYCLE-1)
-                 || next_state != state)
-            cycle_cnt <= 32'd0;
-        else
-            cycle_cnt <= cycle_cnt + 32'd1;
-    end
-
-    // generate TX line
-    always @(posedge clk or negedge rst) begin
-        if (!rst)
-            tx_reg <= 1'b1;
-        else begin
+            tx_reg        <= 1'b1;
+            ready         <= 1'b0;
+            active        <= 1'b1;
+        end else if (active) begin
             case (state)
-                S_IDLE, S_STOP:    tx_reg <= 1'b1;              // idle or stop bit
-                S_START:           tx_reg <= 1'b0;              // start bit
-                S_SEND_BYTE:       tx_reg <= tx_data_latch[bit_cnt];
-                default:           tx_reg <= 1'b1;
+                S_IDLE: begin
+                    tx_reg <= 1'b1;
+                    ready  <= !valid;
+                    bit_cnt <= 3'd0;
+                    cycle_cnt <= 32'd0;
+                    if (valid) begin
+                        tx_data_latch <= data;
+                        state <= S_START;
+                        ready <= 1'b0;
+                    end
+                end
+                S_START: begin
+                    tx_reg <= 1'b0;
+                    if (cycle_cnt == CYCLE-1) begin
+                        state <= S_SEND_BYTE;
+                        cycle_cnt <= 32'd0;
+                    end else begin
+                        cycle_cnt <= cycle_cnt + 1;
+                    end
+                end
+                S_SEND_BYTE: begin
+                    tx_reg <= tx_data_latch[bit_cnt];
+                    if (cycle_cnt == CYCLE-1) begin
+                        cycle_cnt <= 32'd0;
+                        if (bit_cnt == 3'd7) begin
+                            state <= S_STOP;
+                        end else begin
+                            bit_cnt <= bit_cnt + 1;
+                        end
+                    end else begin
+                        cycle_cnt <= cycle_cnt + 1;
+                    end
+                end
+                S_STOP: begin
+                    tx_reg <= 1'b1;
+                    if (cycle_cnt == CYCLE-1) begin
+                        state <= S_IDLE;
+                        ready <= 1'b1;
+                        cycle_cnt <= 32'd0;
+                    end else begin
+                        cycle_cnt <= cycle_cnt + 1;
+                    end
+                end
+                default: begin
+                    state <= S_IDLE;
+                    tx_reg <= 1'b1;
+                    ready <= 1'b0;
+                end
             endcase
         end
     end

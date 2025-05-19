@@ -1,6 +1,7 @@
 module core (
     input         clk,
     input         rst_i,
+    input         system_active,
     output [31:0] pc_out,
     output [31:0] instr_out,
     output        error
@@ -13,7 +14,8 @@ module core (
     pc #(.WIDTH(32)) u_pc (
         .clk(clk), .rst_i(rst_i),
         .next_pc(next_pc), .pc_sel(pc_sel),
-        .halt(halt), .pc(pc_out)
+        .halt(halt || !system_active), // halt if error or not active
+        .pc(pc_out)
     );
     instr_mem #(.ADDR_WIDTH(10)) u_imem (
         .addr(pc_out[11:2]), .instr(instr_out)
