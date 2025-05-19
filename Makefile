@@ -22,7 +22,8 @@ hw:
 
 sim:
 	$(VERILATOR) --trace  $(VER_FLAGS) --exe top_tb.cpp $(RTL)
-	./obj_dir/V$(TOP)
+	-@echo "\n\n\033[92mExecuting Verilator simulation:\033[0m"
+	-@./obj_dir/V$(TOP)
 
 wave:
 	gtkwave sim.vcd &
